@@ -1,84 +1,62 @@
-import pandas as pd
-import math
-import streamlit as st
-from io import BytesIO
+# app.py — Γραμμική Εκτέλεση Βημάτων 1–3 Χωρίς Χρήση Σεναρίων
 
-st.set_page_config(page_title="Κατανομή Πυρήνα Μαθητών (Βήματα 1–3)", layout="wide")
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+from valid_core_steps import run_step_1, run_step_2, run_step_3, calculate_stats
+
+st.set_page_config(page_title="Κατανομή Πυρήνα Μαθητών", layout="wide")
 st.title("📘 Κατανομή Πυρήνα Μαθητών (Βήματα 1–3)")
 
-uploaded_file = st.file_uploader("📥 Μεταφόρτωση Excel με Μαθητές Πυρήνα", type=[".xlsx"])
+# --- Κωδικός Πρόσβασης ---
+with st.sidebar:
+    st.markdown("## 🔒 Κωδικός Πρόσβασης")
+    password = st.text_input("Εισάγετε τον κωδικό:", type="password")
+    if password != "katanomi2025":
+        st.warning("🔐 Εισάγετε σωστό κωδικό για πρόσβαση στην εφαρμογή.")
+        st.stop()
+    enabled = st.checkbox("✅ Ενεργοποίηση Εφαρμογής", value=True)
+    if not enabled:
+        st.info("Η εφαρμογή είναι απενεργοποιημένη.")
+        st.stop()
+
+# --- Μεταφόρτωση Excel ---
+st.markdown("### 📥 Μεταφόρτωση Excel με Μαθητές")
+uploaded_file = st.file_uploader("Drag and drop file here", type=["xlsx"])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
-    df['ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] = None
-    class_names = ["Α1", "Α2"]
+    st.success("✅ Το αρχείο ανέβηκε επιτυχώς!")
 
-    # ΒΗΜΑ 1 – ΠΑΙΔΙΑ ΕΚΠΑΙΔΕΥΤΙΚΩΝ
-    teacher_kids = df[df['ΠΑΙΔΙ ΕΚΠΑΙΔΕΥΤΙΚΟΥ'] == 'Ν']
-    if len(teacher_kids) <= 2:
-        for i, (_, row) in enumerate(teacher_kids.iterrows()):
-            df.loc[row.name, 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] = class_names[i]
-    else:
-        assigned = {c: [] for c in class_names}
-        for _, row in teacher_kids.iterrows():
-            conflict = row['ΣΥΓΚΡΟΥΣΗ']
-            gender = row['ΦΥΛΟ']
-            counts = {c: len(assigned[c]) for c in class_names}
-            sorted_classes = sorted(class_names, key=lambda x: counts[x])
-            for cls in sorted_classes:
-                if conflict not in assigned[cls]:
-                    df.loc[row.name, 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] = cls
-                    assigned[cls].append(row['ΟΝΟΜΑΤΕΠΩΝΥΜΟ'])
-                    break
+    # --- Υπολογισμός αριθμού τμημάτων ---
+    num_students = len(df)
+    num_sections = -(-num_students // 25)  # Στρογγυλοποίηση προς τα πάνω
+    st.success(f"✅ Υπολογίστηκαν {num_sections} τμήματα.")
 
-    # ΒΗΜΑ 2 – ΖΩΗΡΟΙ
-    lively_kids = df[df['ΖΩΗΡΟΣ'] == 'Ν']
-    assigned_lively = {c: df[(df['ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] == c) & (df['ΖΩΗΡΟΣ'] == 'Ν')].shape[0] for c in class_names}
-    for _, row in lively_kids.iterrows():
-        if pd.notna(df.loc[row.name, 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ']): continue
-        conflict = row['ΣΥΓΚΡΟΥΣΗ']
-        gender = row['ΦΥΛΟ']
-        sorted_classes = sorted(class_names, key=lambda x: assigned_lively[x])
-        for cls in sorted_classes:
-            class_df = df[df['ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] == cls]
-            if conflict not in class_df['ΟΝΟΜΑΤΕΠΩΝΥΜΟ'].values:
-                df.loc[row.name, 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] = cls
-                assigned_lively[cls] += 1
-                break
+    # --- Εμφάνιση Πυρήνα ---
+    df_core = df[(df['ΠΑΙΔΙ ΕΚΠΑΙΔΕΥΤΙΚΟΥ'] == 'Ν') | (df['ΖΩΗΡΟΣ'] == 'Ν') | (df['ΙΔΙΑΙΤΕΡΟΤΗΤΑ'] == 'Ν')].copy()
+    df_core.reset_index(drop=True, inplace=True)
+    st.markdown("### 🎯 Πυρήνας Μαθητών (Εντοπισμένος)")
+    st.dataframe(df_core)
 
-    # ΒΗΜΑ 3 – ΙΔΙΑΙΤΕΡΟΤΗΤΕΣ
-    special_kids = df[df['ΙΔΙΑΙΤΕΡΟΤΗΤΑ'] == 'Ν']
-    assigned_special = {c: df[(df['ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] == c) & (df['ΙΔΙΑΙΤΕΡΟΤΗΤΑ'] == 'Ν')].shape[0] for c in class_names}
-    lively_counts = {c: df[(df['ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] == c) & (df['ΖΩΗΡΟΣ'] == 'Ν')].shape[0] for c in class_names}
-    for _, row in special_kids.iterrows():
-        if pd.notna(df.loc[row.name, 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ']): continue
-        conflict = row['ΣΥΓΚΡΟΥΣΗ']
-        gender = row['ΦΥΛΟ']
-        sorted_classes = sorted(class_names, key=lambda c: (lively_counts[c], assigned_special[c]))
-        for cls in sorted_classes:
-            class_df = df[df['ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] == cls]
-            if conflict not in class_df['ΟΝΟΜΑΤΕΠΩΝΥΜΟ'].values:
-                df.loc[row.name, 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ'] = cls
-                assigned_special[cls] += 1
-                break
+    # --- Βήμα 1 ---
+    df_step1 = run_step_1(df_core.copy(), num_sections)
+    # --- Βήμα 2 ---
+    df_step2 = run_step_2(df_step1.copy(), num_sections)
+    # --- Βήμα 3 ---
+    df_step3 = run_step_3(df_step2.copy(), num_sections)
 
-    st.subheader("📋 Προεπισκόπηση Κατανομής Πυρήνα")
-    st.dataframe(df[['ΟΝΟΜΑΤΕΠΩΝΥΜΟ', 'ΠΑΙΔΙ ΕΚΠΑΙΔΕΥΤΙΚΟΥ', 'ΖΩΗΡΟΣ', 'ΙΔΙΑΙΤΕΡΟΤΗΤΑ', 'ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ']])
+    st.markdown("### ✅ ΠΡΟΤΕΙΝΟΜΕΝΗ ΚΑΤΑΝΟΜΗ ΠΥΡΗΝΑ")
+    st.dataframe(df_step3)
 
-    # 📊 Στατιστικά
-    stats = df.groupby('ΠΡΟΤΕΙΝΟΜΕΝΟ_ΤΜΗΜΑ').agg(
-        Αριθμός_Μαθητών=('ΟΝΟΜΑΤΕΠΩΝΥΜΟ', 'count'),
-        Αγόρια=('ΦΥΛΟ', lambda x: (x == 'Α').sum()),
-        Κορίτσια=('ΦΥΛΟ', lambda x: (x == 'Κ').sum()),
-        Παιδιά_Εκπαιδευτικών=('ΠΑΙΔΙ ΕΚΠΑΙΔΕΥΤΙΚΟΥ', lambda x: (x == 'Ν').sum()),
-        Ζωηροί=('ΖΩΗΡΟΣ', lambda x: (x == 'Ν').sum()),
-        Ιδιαιτερότητες=('ΙΔΙΑΙΤΕΡΟΤΗΤΑ', lambda x: (x == 'Ν').sum())
-    ).reset_index()
-    st.subheader("📊 Στατιστικά Κατανομής")
+    # --- Στατιστικά ---
+    stats = calculate_stats(df_step3, num_sections)
+    st.markdown("### 📊 Στατιστικά Κατανομής")
     st.dataframe(stats)
 
-    # 📥 Λήψη Excel
+    # --- Λήψη αποτελέσματος ---
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Κατανομή Πυρήνα')
-    st.download_button("📤 Λήψη Αρχείου Excel", data=output.getvalue(), file_name="katanomi_pyrina_v1.xlsx")
+        df_step3.to_excel(writer, index=False, sheet_name='Κατανομή Πυρήνα')
+        stats.to_excel(writer, index=False, sheet_name='Στατιστικά')
+    st.download_button("📥 Λήψη Κατανομής σε Excel", data=output.getvalue(), file_name="Πυρήνας_Κατανομής.xlsx")
